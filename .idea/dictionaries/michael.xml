@@ -1,8 +1,13 @@
 <component name="ProjectDictionaryState">
   <dictionary name="michael">
     <words>
+      <w>convolutional</w>
       <w>datasets</w>
+      <w>keras</w>
+      <w>overfitting</w>
+      <w>regularizer</w>
       <w>tensorboard</w>
+      <w>tensorflow</w>
     </words>
   </dictionary>
 </component>

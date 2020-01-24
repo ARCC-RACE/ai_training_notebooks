@@ -1,16 +1,17 @@
-from numpy import np
+import numpy as np
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 from keras.callbacks import TensorBoard
-import importlib, cv2, os, random, psutil, time,  getpass, platform, csv
+import importlib, cv2, os, random, psutil, time,  getpass, platform, csv, shutil
 
-class SuperviseTrainer:
+class BaseSupervisedTrainer:
 
-    def __init__(self, export_directory, model_file, utils_file, data_directory=""):
+    def __init__(self, export_directory, model_file="rosey.py", utils_file="utils.py", data_directory=""):
         self.export_directory = export_directory
         self.data_directory = data_directory
         self.datasets = None # provides ability to combine datasets
         self.model_file = importlib.import_module(model_file)
+        self.model = self.model_file.BaseSequentialModel(utils_file) # by default this is a base sequential model
         self.utils = importlib.import_module(utils_file)
 
         self.tensorboard = None
@@ -28,11 +29,21 @@ class SuperviseTrainer:
         self.tensorboard = TensorBoard(log_dir="{}/logs/{}".format(path, time_stamp))
         print("Run `tensorboard --logdir=\"{}/logs/{}\"` and see `http://localhost:6006` to see training status and graph".format(path,time_stamp) + "\n\n")
 
-        self.model_file.model.summary()  # print a summary representation of model
+        self.model.model()
 
-        self.model_file.compile_model()
+        print("Model graph created!")
+
+        self.model.compile()
 
         print("Model compiled!")
+
+    def get_model(self):
+        return self.model
+
+    # easy way to get the model training
+    def train_model(self, batch_size=40, validation_steps=1000, nb_epochs=10, steps_per_epoch=1500, regularizer=0.01):
+        self.model.train(batch_size, validation_steps, nb_epochs, steps_per_epoch, regularizer)
+
 
     def set_dataset(self):
         data_dir = input(
@@ -76,25 +87,114 @@ class SuperviseTrainer:
         plt.imshow(depth_img)
         plt.show()
 
-    def load_dataset(self, dynamic=True, percent_training=80, existing_npy=None, npy_save_directory=None):
+    def load_dataset(self, dynamic=True, percent_training=0.8, existing_npy_directory=None,  npy_save_directory=None, total_npy_size=11000, num_stacked_images=1):
         # load training set
-        print("Loading training set...")
+        print("Loading dataset for training set...")
+
+        # these will be 2D arrays where each row represents a dataset
+        x = []
+        y = []
+        for dataset in self.datasets:
+            with open(os.path.join(os.path.join(self.data_directory, dataset), "tags.csv")) as csvfile:
+                reader = csv.DictReader(csvfile)
+                for row in reader:
+                    # print(row['Time_stamp'] + ".jpg", row['Steering_angle'])
+                    x.append(row['time_stamp'] + ".jpg",)  # get image path
+                    y.append(float(row['raw_steering']),) # get steering value
+
+            print("Number of data samples is " + len(y))
+
+        data = list(zip(x,y))
+        random.shuffle(data)
+        x,y = zip(*data)
 
         if dynamic:
-            print("Loading data file paths for dynamic loading during training/evaluation")
-            # these will be 2D arrays where each row represents a dataset
-            x = []
-            y = []
-            for dataset in self.datasets:
-                with open(os.path.join(os.path.join(self.data_directory, dataset), "tags.csv")) as csvfile:
-                    reader = csv.DictReader(csvfile)
-                    for row in reader:
-                        # print(row['Time_stamp'] + ".jpg", row['Steering_angle'])
-                        x.append(row['time_stamp'] + ".jpg",)  # get image path
-                        y.append(float(row['raw_steering']),) # get steering value
+            print("Loading data file paths for dynamic loading during training/evaluation...")
+            for i, val in enumerate(x):
+                self.X_training.append(val)
+                if i > len(x)*percent_training:
+                    self.X_test.append(val)
+            for i, val in enumerate(y):
+                self.Y_training.append(val)
+                if i > len(y)*percent_training:
+                    self.Y_test.append(val)
+            return self.X_training, self.Y_training, self.X_test, self.Y_test
 
-                print("Number of data samples is " + len(y))
+        elif existing_npy_directory is None:
 
-            data = list(zip(x,y))
-            random.shuffle(data)
-            x,y = zip(*data)
+            print("\nBuilding FAT numpy array of augmented dataset... (this may take a while)")
+            # image with attached steering value occupies channels 0-2
+            images = np.empty([self.utils.total_size, self.utils.IMAGE_HEIGHT, self.utils.IMAGE_WIDTH, self.utils.IMAGE_CHANNELS * num_stacked_images])
+            steers = np.empty(total_npy_size)
+            # Get RAM information for usage prediction
+            ram = psutil.virtual_memory()
+            initial_ram_usage = ram.used
+            for i in range(total_npy_size):
+                dataset_index = random.randint(0, len(self.datasets) - 1)
+                index = np.random.randint(0, len())
+                if index < self.utils.num_stacked_images - 1:
+                    index = num_stacked_images - 1
+                # get the num_stacked_images file paths to feed into the network
+                imgs = []
+                for z in range(num_stacked_images):
+                    imgs.append(x[dataset_index][index - z])
+                steering_angle = y[dataset_index]
+                # argumentation
+                if np.random.rand() < 0.6:
+                    imgs, steering_angle = self.utils.augument(
+                        os.path.join(os.path.join(self.data_directory, self.datasets[dataset_index]), "color_images"), imgs,
+                        steering_angle)
+                else:
+                    imgs = self.utils.load_images(
+                        os.path.join(os.path.join(self.data_directory, self.datasets[dataset_index]), "color_images"), imgs)
+
+                # add the image and steering angle to the batch
+                images[i] = self.utils.preprocess(imgs)
+                steers[i] = steering_angle
+                ram = psutil.virtual_memory()
+                print("Loading number: " + str(i) + "/" + str(total_npy_size), end="  ")
+                # Note the predicted RAM usage is a very ruff estimate and depends on other programs running on your machine. For greatest accuracy do not run any other programs or open any new applications while computing estimate
+                print("Total predicted RAM usage: %.3f/%.3fGB" % (
+                    (total_npy_size * (ram.used - initial_ram_usage) / (i + 1)) / 1000000000,
+                    (ram.total - initial_ram_usage) / 1000000000), end="  ")
+                print(str(ram.percent) + "%", end="\r")
+
+            # option to save the generated numpy so it can be reused later by train_model_from_old_npy()
+            if npy_save_directory is not None:
+                print("Saving dataset npy...")
+                np.save(os.path.join(npy_save_directory, 'x_images.npy'), images)
+                np.save(os.path.join(npy_save_directory, 'y_steers.npy'), steers)
+                print("Dataset saved!")
+
+            return images, steers
+
+        elif existing_npy_directory is not None:
+            print("\nLoading FAT numpy array of augmented dataset... (this may take a while)")
+
+            # option to save the generated numpy so it can be reused later
+            images = np.load(os.path.join(existing_npy_directory, 'x_images.npy'))
+            steers = np.load(os.path.join(existing_npy_directory, 'y_steers.npy'))
+
+            return images, steers
+
+        else:
+            print("Data load failed. Could not find viable method for loading based on input parameters.")
+            return False
+
+    def export_model(self, export_path):
+        print("Saving model to " + export_path)
+        try:
+            shutil.copy("./model.h5", export_path)
+            shutil.copy("./utils.h5", export_path)
+            shutil.copy("./notes.h5", export_path)
+            shutil.copy("./config.h5", export_path)
+        except Exception as e:
+            print("Model export failed: " + e)
+            return False
+        print("Model exported successfully")
+        return True
+
+
+        # print("Finished building, beginning training of neural network")
+        # self.model.fit(x_images, y_steers, self.batch_size, nb_epoch=50, verbose=1, validation_split=0.2,
+        #                shuffle=True, callbacks=[checkpoint, self.tensorboard])
