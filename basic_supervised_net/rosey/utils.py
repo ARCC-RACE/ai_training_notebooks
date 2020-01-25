@@ -126,6 +126,7 @@ def augument(data_dir, img_path, steering_angle, range_x=100, range_y=10):
     (The steering angle is associated with the image)
     """
     image, steering_angle = choose_image(data_dir, img_path, steering_angle)
+    image = preprocess(image)
     image, steering_angle = random_flip(image, steering_angle)
     image, steering_angle = random_translate(image, steering_angle, range_x, range_y)
     image = random_shadow(image)

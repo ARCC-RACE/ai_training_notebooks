@@ -7,5 +7,5 @@ from model_base import BaseSequentialModel
 
 class Rosey(BaseSequentialModel):
 
-    def __init__(self):
-        super()
+    def __init__(self, utils_file="utils"):
+        super().__init__(utils_file)
