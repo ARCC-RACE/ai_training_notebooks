@@ -192,11 +192,13 @@ class BaseSupervisedTrainer:
 
     def export_model(self, export_path):
         print("Saving model to " + export_path)
+        if not os.path.isdir(export_path):
+            os.mkdir(export_path)
         try:
-            shutil.copy("./model.h5", export_path)
-            shutil.copy("./utils.h5", export_path)
-            shutil.copy("./notes.h5", export_path)
-            shutil.copy("./config.h5", export_path)
+            shutil.copy("./model.h5", os.path.join(export_path, "model.h5"))
+            shutil.copy("./utils.py", os.path.join(export_path, "utils.py"))
+            shutil.copy("./notes.txt", os.path.join(export_path, "notes.txt"))
+            shutil.copy("./config.yaml", os.path.join(export_path, "config.yaml"))
         except Exception as e:
             print("Model export failed: " + e)
             return False
