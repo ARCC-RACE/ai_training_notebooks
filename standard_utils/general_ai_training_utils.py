@@ -4,6 +4,18 @@ import matplotlib.pyplot as plt
 from keras.callbacks import TensorBoard
 import importlib, cv2, os, random, psutil, time,  getpass, platform, csv, shutil
 from keras.optimizers import Adam
+from tensorflow.python.framework import graph_io
+from tensorflow.keras.models import load_model
+import tensorflow as tf
+from tensorflow.python.compiler.tensorrt import trt_convert as trt
+
+
+def freeze_graph(graph, session, output, save_pb_dir='.', save_pb_name='frozen_model.pb', save_pb_as_text=False):
+    with graph.as_default():
+        graphdef_inf = tf.graph_util.remove_training_nodes(graph.as_graph_def())
+        graphdef_frozen = tf.graph_util.convert_variables_to_constants(session, graphdef_inf, output)
+        graph_io.write_graph(graphdef_frozen, save_pb_dir, save_pb_name, as_text=save_pb_as_text)
+        return graphdef_frozen
 
 
 class BaseSupervisedTrainer:
@@ -29,6 +41,8 @@ class BaseSupervisedTrainer:
         # training data from numpy files
         self.x = None
         self.y = None
+
+        self.export_path = None
 
     def build_model(self, loss='mean_squared_error', optimizer=Adam(1.0e-4), regularizer=0.01):
 
@@ -190,7 +204,10 @@ class BaseSupervisedTrainer:
             print("Data load failed. Could not find viable method for loading based on input parameters.")
             return False
 
-    def export_model(self, export_path):
+    def export_model(self, export_path, tftrt=True):
+
+        self.export_path = export_path
+
         print("Saving model to " + export_path)
         if not os.path.isdir(export_path):
             os.mkdir(export_path)
@@ -199,8 +216,58 @@ class BaseSupervisedTrainer:
             shutil.copy("./utils.py", os.path.join(export_path, "utils.py"))
             shutil.copy("./notes.txt", os.path.join(export_path, "notes.txt"))
             shutil.copy("./config.yaml", os.path.join(export_path, "config.yaml"))
+
+            if tftrt:
+                print("Optimizing model with tensorRT")
+                # Clear any previous session.
+                tf.keras.backend.clear_session()
+                # This line must be executed before loading Keras model.
+                tf.keras.backend.set_learning_phase(0)
+
+                model = load_model("./model.h5")
+
+                session = tf.keras.backend.get_session()
+
+                # Prints input and output nodes names, take notes of them.
+                input_names = [t.op.name for t in model.inputs]
+                output_names = [t.op.name for t in model.outputs]
+
+                # Prints input and output nodes names, take notes of them.
+                print(input_names, output_names)
+
+                freeze_graph(session.graph, session, [out.op.name for out in model.outputs], save_pb_dir=export_path)
+
+                converter = trt.TrtGraphConverter(
+                    input_saved_model_dir=os.path.join(export_path, "frozen_model.pb"),
+                    max_workspace_size_bytes=(11 < 32),
+                    precision_mode="FP16",
+                    maximum_cached_engines = 100)
+                converter.convert()
+                converter.save(os.path.join(export_path, "trt_graph.pb"))
+
         except Exception as e:
             print("Model export failed: " + e)
             return False
         print("Model exported successfully")
         return True
+
+    def test_tftrt_model(self, model_file):
+        if self.export_path is not None:
+            try:
+                with tf.Session() as sess:
+                    # First load the SavedModel into the session
+                    tf.saved_model.loader.load(sess, [tf.saved_model.tag_constants.SERVING], os.path.join(self.export_path, "trt_graph.pb"))
+
+                    input = self.utils.preprocess(self.utils.load_image(random.choice(self.X_test)))
+                    fig = plt.figure(figsize=(8, 8))
+                    columns = 1
+                    rows = 1
+                    fig.add_subplot(rows, columns, 1)
+                    plt.imshow(input)
+
+                    output = sess.run(input)
+                    print("Output: " + str(output))
+            except Exception as e:
+                print(e)
+        else:
+            print("Please export model with tftrt")
