@@ -1,21 +1,14 @@
 import numpy as np
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
-from keras.callbacks import TensorBoard
+import tensorflow as tf
+from tensorflow.python.keras.callbacks import TensorBoard
 import importlib, cv2, os, random, psutil, time,  getpass, platform, csv, shutil
-from keras.optimizers import Adam
+from tensorflow.python.keras.optimizers import Adam
 from tensorflow.python.framework import graph_io
 from tensorflow.keras.models import load_model
-import tensorflow as tf
+from tensorflow.python.saved_model import tag_constants
 from tensorflow.python.compiler.tensorrt import trt_convert as trt
-
-
-def freeze_graph(graph, session, output, save_pb_dir='.', save_pb_name='frozen_model.pb', save_pb_as_text=False):
-    with graph.as_default():
-        graphdef_inf = tf.graph_util.remove_training_nodes(graph.as_graph_def())
-        graphdef_frozen = tf.graph_util.convert_variables_to_constants(session, graphdef_inf, output)
-        graph_io.write_graph(graphdef_frozen, save_pb_dir, save_pb_name, as_text=save_pb_as_text)
-        return graphdef_frozen
 
 
 class BaseSupervisedTrainer:
@@ -211,63 +204,52 @@ class BaseSupervisedTrainer:
         print("Saving model to " + export_path)
         if not os.path.isdir(export_path):
             os.mkdir(export_path)
-        try:
-            shutil.copy("./model.h5", os.path.join(export_path, "model.h5"))
-            shutil.copy("./utils.py", os.path.join(export_path, "utils.py"))
-            shutil.copy("./notes.txt", os.path.join(export_path, "notes.txt"))
-            shutil.copy("./config.yaml", os.path.join(export_path, "config.yaml"))
 
-            if tftrt:
-                print("Optimizing model with tensorRT")
-                # Clear any previous session.
-                tf.keras.backend.clear_session()
-                # This line must be executed before loading Keras model.
-                tf.keras.backend.set_learning_phase(0)
+        shutil.copy("./model.h5", os.path.join(export_path, "model.h5"))
+        shutil.copy("./utils.py", os.path.join(export_path, "utils.py"))
+        shutil.copy("./notes.txt", os.path.join(export_path, "notes.txt"))
+        shutil.copy("./config.yaml", os.path.join(export_path, "config.yaml"))
 
-                model = load_model("./model.h5")
+        if tftrt:
+            print("Optimizing model with tensorRT")
 
-                session = tf.keras.backend.get_session()
+            tf.keras.backend.set_learning_phase(0)
 
-                # Prints input and output nodes names, take notes of them.
-                input_names = [t.op.name for t in model.inputs]
-                output_names = [t.op.name for t in model.outputs]
+            model = load_model("./model.h5")
 
-                # Prints input and output nodes names, take notes of them.
-                print(input_names, output_names)
+            tf.saved_model.save(model, export_path)
 
-                freeze_graph(session.graph, session, [out.op.name for out in model.outputs], save_pb_dir=export_path)
+            conversion_params = trt.DEFAULT_TRT_CONVERSION_PARAMS
+            conversion_params = conversion_params._replace(
+                max_workspace_size_bytes=(1 << 32))
+            conversion_params = conversion_params._replace(precision_mode="FP16")
+            conversion_params = conversion_params._replace(
+                maximum_cached_engines=100)
 
-                converter = trt.TrtGraphConverter(
-                    input_saved_model_dir=os.path.join(export_path, "frozen_model.pb"),
-                    max_workspace_size_bytes=(11 < 32),
-                    precision_mode="FP16",
-                    maximum_cached_engines = 100)
-                converter.convert()
-                converter.save(os.path.join(export_path, "trt_graph.pb"))
+            converter = trt.TrtGraphConverterV2(
+                input_saved_model_dir=export_path,
+                conversion_params=conversion_params)
+            converter.convert()
 
-        except Exception as e:
-            print("Model export failed: " + e)
-            return False
-        print("Model exported successfully")
-        return True
+            if not os.path.isdir(os.path.join(export_path, "rt")):
+                os.mkdir(os.path.join(export_path, "rt"))
+            converter.save(os.path.join(export_path, "rt"))
 
-    def test_tftrt_model(self, model_file):
-        if self.export_path is not None:
-            try:
-                with tf.Session() as sess:
-                    # First load the SavedModel into the session
-                    tf.saved_model.loader.load(sess, [tf.saved_model.tag_constants.SERVING], os.path.join(self.export_path, "trt_graph.pb"))
+    def test_tftrt_model(self, export_path = None):
+        # First load the SavedModel into the session
+        # saved_model_loaded = tf.saved_model.load(os.path.join(export_path, "rt"), tags=[tag_constants.SERVING])
+        saved_model_loaded = tf.saved_model.load(export_path, tags=[tag_constants.SERVING])
+        infer = saved_model_loaded.signatures['serving_default']
 
-                    input = self.utils.preprocess(self.utils.load_image(random.choice(self.X_test)))
-                    fig = plt.figure(figsize=(8, 8))
-                    columns = 1
-                    rows = 1
-                    fig.add_subplot(rows, columns, 1)
-                    plt.imshow(input)
+        input = self.utils.preprocess(self.utils.load_image(os.path.join(os.path.join(self.data_directory, self.datasets[0]), "color_images"),
+                                                                         random.choice(self.X_test)))
+        fig = plt.figure(figsize=(8, 8))
+        columns = 1
+        rows = 1
+        fig.add_subplot(rows, columns, 1)
+        plt.imshow(input)
 
-                    output = sess.run(input)
-                    print("Output: " + str(output))
-            except Exception as e:
-                print(e)
-        else:
-            print("Please export model with tftrt")
+        output = infer(tf.constant(np.array([input]), dtype=tf.float32))
+        print(output)
+        out_array = output["dense_4"].numpy()
+        print("Output: %.20f"%out_array[0,0])

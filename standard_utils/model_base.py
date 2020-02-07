@@ -1,14 +1,14 @@
 #!/usr/bin/env python
 
 # Keras imports to create a convolutional neural network using tensorflow on the low level
-from keras.models import Sequential
-from keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Lambda, Dropout
+from tensorflow.python.keras.models import Sequential
+from tensorflow.python.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Lambda, Dropout
 #to save the model periodically as checkpoints for loading later
-from keras.callbacks import ModelCheckpoint
+from tensorflow.python.keras.callbacks import ModelCheckpoint
 #popular optimization strategy that uses gradient descent
-from keras.optimizers import Adam
+from tensorflow.python.keras.optimizers import Adam
 #add regularizer to limit overfitting
-from keras import regularizers
+from tensorflow.python.keras import regularizers
 #Gotta have them graphs
 #helper class to define input shape and generate training images given image paths & steering angles
 import importlib, os
