@@ -230,7 +230,6 @@ class BaseSupervisedTrainer:
             converter = trt.TrtGraphConverterV2(
                 input_saved_model_dir=export_path,
                 conversion_params=conversion_params)
-            # converter.build(self._rt_input_function)
             converter.convert()
 
             if not os.path.isdir(os.path.join(export_path, "rt")):
@@ -280,6 +279,5 @@ class BaseSupervisedTrainer:
         start = time.time()
         output = frozen_func(tf.constant(np.array([input]), dtype=tf.float32))[0].numpy()
         stop = time.time()
-        print(output)
         print("RT inference time: " + str(stop - start))
         print("RT Output: %.20f"%output[0,0])
