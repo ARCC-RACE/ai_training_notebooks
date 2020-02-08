@@ -9,6 +9,7 @@ from tensorflow.python.framework import graph_io
 from tensorflow.keras.models import load_model
 from tensorflow.python.saved_model import tag_constants
 from tensorflow.python.compiler.tensorrt import trt_convert as trt
+import time
 
 
 class BaseSupervisedTrainer:
@@ -229,17 +230,20 @@ class BaseSupervisedTrainer:
             converter = trt.TrtGraphConverterV2(
                 input_saved_model_dir=export_path,
                 conversion_params=conversion_params)
+            # converter.build(self._rt_input_function)
             converter.convert()
 
             if not os.path.isdir(os.path.join(export_path, "rt")):
                 os.mkdir(os.path.join(export_path, "rt"))
             converter.save(os.path.join(export_path, "rt"))
 
+    def _rt_input_function(self):
+        input = self.utils.preprocess(self.utils.load_image(os.path.join(os.path.join(self.data_directory, self.datasets[0]), "color_images"),random.choice(self.X_test)))
+        yield input
+
     def test_tftrt_model(self, export_path = None):
         # First load the SavedModel into the session
-        # saved_model_loaded = tf.saved_model.load(os.path.join(export_path, "rt"), tags=[tag_constants.SERVING])
-        saved_model_loaded = tf.saved_model.load(export_path, tags=[tag_constants.SERVING])
-        infer = saved_model_loaded.signatures['serving_default']
+        keras_model = tf.keras.models.load_model(os.path.join(export_path, "model.h5")) # keras model
 
         input = self.utils.preprocess(self.utils.load_image(os.path.join(os.path.join(self.data_directory, self.datasets[0]), "color_images"),
                                                                          random.choice(self.X_test)))
@@ -249,7 +253,33 @@ class BaseSupervisedTrainer:
         fig.add_subplot(rows, columns, 1)
         plt.imshow(input)
 
-        output = infer(tf.constant(np.array([input]), dtype=tf.float32))
+        # Test the keras model
+        output = keras_model.predict(tf.constant(np.array([input]), dtype=tf.float32))
+        start = time.time()
+        output = keras_model.predict(tf.constant(np.array([input]), dtype=tf.float32))
+        stop = time.time()
+        print("keras inference time: " + str(stop - start))
+        print("Keras Output: %.20f"%output[0,0])
+        print()
+
+        # Test the normal TF model
+        saved_model_loaded = tf.saved_model.load(export_path, tags=[tag_constants.SERVING]) # normal saved model
+        graph_func = saved_model_loaded.signatures["serving_default"] # normal saved model
+        output = graph_func(tf.constant(np.array([input]), dtype=tf.float32))["dense_4"].numpy() # normal saved model
+        start = time.time()
+        output = graph_func(tf.constant(np.array([input]), dtype=tf.float32))["dense_4"].numpy() # normal saved model
+        stop = time.time()
+        print("normal tf inference time: " + str(stop - start))
+        print("Normal TF Output: %.20f"%output[0,0])
+        print()
+
+        # Test the TensorRT model
+        tftrt_model_loaded = tf.saved_model.load(os.path.join(export_path, "rt"), tags=[tag_constants.SERVING])
+        frozen_func = trt.convert_to_constants.convert_variables_to_constants_v2(tftrt_model_loaded.signatures["serving_default"])
+        output = frozen_func(tf.constant(np.array([input]), dtype=tf.float32))[0].numpy()
+        start = time.time()
+        output = frozen_func(tf.constant(np.array([input]), dtype=tf.float32))[0].numpy()
+        stop = time.time()
         print(output)
-        out_array = output["dense_4"].numpy()
-        print("Output: %.20f"%out_array[0,0])
+        print("RT inference time: " + str(stop - start))
+        print("RT Output: %.20f"%output[0,0])
