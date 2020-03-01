@@ -1,14 +1,15 @@
 import numpy as np
+import tensorflow as tf
 import cv2, os
 import matplotlib.image as mpimg
 
 ############ CORE FUNCTIONS
-IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_CHANNELS = 480, 640, 3
+IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_CHANNELS = 240, 640, 3
 INPUT_SHAPE = (IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_CHANNELS)
 
 def preprocess_data(last_color_image=None, last_depth_image=None, recursion_factor=None):
     image = preprocess(last_color_image)  # preprocess image (crop, resize, rgb2yuv)
-    image = np.array([image])  # give the model a 4D array
+    image = np.array([image])/255.0  # give the model a 4D array
     return image, None # x, recursion_factor
 
 def postprocess_data(command):
@@ -30,7 +31,7 @@ def crop(image):
     """
     Crop the image (removing the sky at the top and the car front at the bottom)
     """
-    return image[60:-1, :, :] # remove the sky
+    return image[200:-1, :, :] # remove the sky
 
 
 def resize(image):
@@ -53,7 +54,7 @@ def preprocess(image):
     """
     image = crop(image)
     image = resize(image)
-    image = rgb2yuv(image)
+#     image = rgb2yuv(image)
     return image
 
 
@@ -120,17 +121,20 @@ def random_brightness(image):
     return cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
 
 
-def augument(data_dir, img_path, steering_angle, range_x=100, range_y=10):
+def augument(data_dir, img_path, steering_angle, range_x=150, range_y=50):
     """
     Generate an augumented image and adjust steering angle.
     (The steering angle is associated with the image)
     """
-    image, steering_angle = choose_image(data_dir, img_path, steering_angle)
-    image = preprocess(image)
-    image, steering_angle = random_flip(image, steering_angle)
+    image = load_image(data_dir, img_path)
+    image, _ = preprocess_data(image)
+    image, steering_angle = random_flip(np.squeeze(image), steering_angle)
     image, steering_angle = random_translate(image, steering_angle, range_x, range_y)
-    image = random_shadow(image)
-    image = random_brightness(image)
+    #     image = random_shadow(image)/255.0
+    image = tf.image.random_contrast(image, 0.2, 0.9)
+    image = tf.image.random_saturation(image, 0.2, 0.9)
+    image = tf.image.random_brightness(image, 0.2)
+    image = tf.image.random_jpeg_quality(image, 10, 100)
 
     return image, steering_angle
 
