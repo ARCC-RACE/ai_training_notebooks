@@ -10,7 +10,7 @@ INPUT_SHAPE = (IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_CHANNELS)
 def preprocess_data(last_color_image=None, last_depth_image=None, recursion_factor=None):
     image = preprocess(last_color_image)  # preprocess image (crop, resize)
     depth_image = preprocess_depth(last_depth_image)  # preprocess image (crop, resize)
-    x = [image, depth_image]  # give the model a 4D array
+    x = [image.astype(np.float32), depth_image.astype(np.float32)]  # give the model a 4D array
     return x, None # x, recursion_factor
 
 def postprocess_data(command):
@@ -62,7 +62,7 @@ def preprocess(image):
     image = crop(image)
     image = resize(image)
 #     image = rgb2yuv(image)
-    return image/255.0
+    return (image/255.0)
 
 
 def preprocess_depth(image):
@@ -71,7 +71,8 @@ def preprocess_depth(image):
     """
     image = crop_depth(image)
     image = resize(image)
-    return np.expand_dims(image/255.0, axis=2)
+    image = np.expand_dims(image/255.0, axis=2)
+    return image
 
 
 def choose_image(data_dir, img_path, steering_angle):
@@ -175,6 +176,8 @@ def augument(data_dir, img_path, depth_path, steering_angle, range_x=200, range_
         gauss = np.random.normal(mean,sigma,(row,col))
         gauss = gauss.reshape(row,col)
         image[1] = image[1] + gauss
+        
+    image[1] = np.expand_dims(image[1], axis=2)
 
     return image, steering_angle
 

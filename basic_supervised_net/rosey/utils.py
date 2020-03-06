@@ -10,7 +10,7 @@ INPUT_SHAPE = (IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_CHANNELS)
 def preprocess_data(last_color_image=None, last_depth_image=None, recursion_factor=None):
     image = preprocess(last_color_image)  # preprocess image (crop, resize, rgb2yuv)
     image = np.array([image])/255.0  # give the model a 4D array
-    return image, None # x, recursion_factor
+    return image.astype(np.float32), None # x, recursion_factor
 
 def postprocess_data(command):
     return float(command), 1.0 # steering, throttle
